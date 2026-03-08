@@ -115,20 +115,12 @@ body {
 }
 
 /* ── Underline / StrikeOut annotation editor visuals ── */
-/* The highlight SVG covers the full text box. Use clip-path to show only
-   the relevant strip, and normal blend mode for a solid opaque line. */
+/* #stripBoxes() in HighlightEditor.#createOutlines() pre-transforms each
+   text-line box into a thin strip before HighlightOutliner runs, so the SVG
+   path already covers only the strip area for every line.  No clip-path is
+   needed; just suppress the multiply blend for a solid, opaque line. */
 
 .canvasWrapper svg.highlight.underline,
 .canvasWrapper svg.highlight.strikeout {
   mix-blend-mode: normal;
-}
-
-/* Show only the bottom ~12% of the line box as the underline strip */
-.canvasWrapper svg.highlight.underline {
-  clip-path: inset(88% 0 0 0);
-}
-
-/* Show only the middle ~14% of the line box as the strikeout strip */
-.canvasWrapper svg.highlight.strikeout {
-  clip-path: inset(43% 0 43% 0);
 }

@@ -959,6 +959,7 @@ window.pdfViewerAPI = pdfViewerAPI
     if (!container) return
 
     let panning       = false
+    let selecting     = false
     let panOriginX    = 0, panOriginY    = 0
     let scrollOriginX = 0, scrollOriginY = 0
 
@@ -994,29 +995,33 @@ window.pdfViewerAPI = pdfViewerAPI
       return (tag === 'SPAN' || tag === 'BR') && !!el?.closest?.('.textLayer')
     }
 
-    // ── cursor management ────────────────────────────────────────────────────
-    //
-    // shape: 'hand' | 'grabbing' | 'default'
-    // JS only fires events — all cursor display logic lives in C#.
+    /** Returns true when the pointer is over a clickable PDF link/button. */
+    function overLink(e) {
+      const el = document.elementFromPoint(e.clientX, e.clientY)
+      return !!el?.closest?.('.annotationLayer .linkAnnotation, .annotationLayer .buttonWidgetAnnotation.pushButton')
+    }
+
+    // ── cursor state ───────────────────────────────────────────────────────
+    // Shapes: 'hand' | 'grabbing' | 'selecting' | 'default'
 
     let _lastShape = ''
 
-    function sendCursor(shape) {
+    function setCursorShape(shape) {
       if (shape === _lastShape) return
       _lastShape = shape
-      window.chrome?.webview?.postMessage(JSON.stringify({ type: 'cursor', shape }))
+       container.classList.remove('swiftpdf-grab', 'swiftpdf-grabbing', 'swiftpdf-selecting')
+      if (shape === 'hand')      container.classList.add('swiftpdf-grab')
+      if (shape === 'grabbing')  container.classList.add('swiftpdf-grabbing')
+      if (shape === 'selecting') container.classList.add('swiftpdf-selecting')
+      window.chrome?.webview?.postMessage(
+        JSON.stringify({ type: 'cursor', shape }))
     }
 
     // ── pointer events ───────────────────────────────────────────────────────
 
-    container.addEventListener('pointerenter', e => {
-      if (isAnnotating() || overScrollbarGutter(e)) return
-      sendCursor('hand')
-    })
-
     container.addEventListener('pointermove', e => {
       if (isAnnotating()) {
-        if (!panning) sendCursor('default')
+        if (!panning) setCursorShape('default')
         return
       }
 
@@ -1026,48 +1031,73 @@ window.pdfViewerAPI = pdfViewerAPI
         return
       }
 
+      // While dragging a text selection, keep I-beam even outside text spans.
+      if (selecting) return
+
       if (overScrollbarGutter(e)) {
-        sendCursor('default')
+        setCursorShape('default')
         return
       }
 
-      sendCursor('hand')
+      setCursorShape(overTextLayer(e) || overLink(e) ? 'default' : 'hand')
     })
 
     container.addEventListener('pointerdown', e => {
       if (isAnnotating() || e.button !== 0 || overScrollbarGutter(e)) return
 
-      // Over a text span: let the browser handle native text selection.
-      if (overTextLayer(e)) return
+      // Over text or link: let the browser handle natively.
+      if (overTextLayer(e)) {
+        selecting = true
+        setCursorShape('selecting')
+        return
+      }
+      if (overLink(e)) return
 
       e.preventDefault()
       panning       = true
       panOriginX    = e.clientX;  panOriginY    = e.clientY
       scrollOriginX = container.scrollLeft
       scrollOriginY = container.scrollTop
-      container.setPointerCapture(e.pointerId)
-      sendCursor('grabbing')
+
+      setCursorShape('grabbing')
+      // document.body.appendChild(panOverlay)
+    })
+
+    // ── window-level pan drag + pan end ──────────────────────────────────────
+
+    window.addEventListener('pointermove', e => {
+      if (!panning) return
+      container.scrollLeft = scrollOriginX + (panOriginX - e.clientX)
+      container.scrollTop  = scrollOriginY + (panOriginY - e.clientY)
     })
 
     function endPan() {
       if (!panning) return
       panning = false
-      sendCursor('hand')
+      if (panOverlay.parentNode) panOverlay.remove()
+      setCursorShape('hand')
     }
 
-    container.addEventListener('pointerup',     endPan)
-    container.addEventListener('pointercancel', endPan)
+    function endSelect() {
+      if (!selecting) return
+      selecting = false
+      setCursorShape('hand')
+    }
+
+    window.addEventListener('pointerup',     () => { endPan(); endSelect() })
+    window.addEventListener('pointercancel', () => { endPan(); endSelect() })
 
     container.addEventListener('pointerleave', () => {
-      if (!panning) sendCursor('default')
+      if (!panning) setCursorShape('default')
     })
 
     // Immediately update cursor when annotation mode changes (no pointermove needed).
     window.PDFViewerApplication?.initializedPromise?.then(() => {
       window.PDFViewerApplication?.eventBus?._on('annotationeditormodechanged', ({ mode }) => {
-        if (!panning) sendCursor(mode > 0 ? 'default' : 'hand')
+        if (!panning) setCursorShape(mode > 0 ? 'default' : 'hand')
       })
-    })
+      })
+    
   }
 
   if (document.readyState === 'loading')

@@ -111,7 +111,10 @@ class HighlightEditor extends AnnotationEditor {
     this.opacity = params.opacity || HighlightEditor._defaultOpacity;
     this.#boxes = params.boxes || null;
     this.#methodOfCreation = params.methodOfCreation || "";
-    this.#markupType = params.markupType || "highlight";
+    // Fall back to the subclass _type so deserialized instances (where
+    // params.markupType is absent) still know they are "underline"/"strikeout".
+    this.#markupType =
+      params.markupType || this.constructor._type || "highlight";
     this.#text = params.text || "";
     this._isDraggable = false;
     this.defaultL10nId = "pdfjs-editor-highlight-editor";
@@ -159,16 +162,43 @@ class HighlightEditor extends AnnotationEditor {
     return { numberOfColors: data.get("color").size };
   }
 
+  // Returns a copy of `boxes` trimmed to the strip for underline/strikeout.
+  // For highlight the original boxes are returned unchanged.
+  // #boxes (original, full-line boxes) is kept intact for QuadPoints serialization.
+  #stripBoxes(boxes) {
+    if (!boxes) {
+      return boxes;
+    }
+    if (this.#markupType === "underline") {
+      // Zero-height strip at 90 % of the line; HighlightOutliner's borderWidth
+      // expands it symmetrically to give a uniform ~1.6 px line on every line.
+      return boxes.map(b => ({ x: b.x, y: b.y + b.height * 0.91, width: b.width, height: 0 }));
+    }
+    if (this.#markupType === "strikeout") {
+      return boxes.map(b => ({ x: b.x, y: b.y + b.height * 0.50, width: b.width, height: 0 }));
+    }
+    return boxes;
+  }
+
   #createOutlines() {
+    // Use strip boxes for the SVG path / clip-path so each line shows only
+    // the underline or strikeout strip.  this.#boxes (original) is kept for
+    // QuadPoints serialisation so external PDF viewers see the correct text region.
+    const boxes = this.#stripBoxes(this.#boxes);
+    let bw = 0.001;
+    if(this.#markupType === "strikeout")
+      bw = 0.0006;
+    if(this.#markupType === "underline")
+      bw = 0.0003;
     const outliner = new HighlightOutliner(
-      this.#boxes,
-      /* borderWidth = */ 0.001
+      boxes,
+      /* borderWidth = */ bw
     );
     this.#highlightOutlines = outliner.getOutlines();
     [this.x, this.y, this.width, this.height] = this.#highlightOutlines.box;
 
     const outlinerForOutline = new HighlightOutliner(
-      this.#boxes,
+      boxes,
       /* borderWidth = */ 0.0025,
       /* innerMargin = */ 0.001,
       this._uiManager.direction === "ltr"
@@ -1110,8 +1140,15 @@ class UnderlineEditor extends HighlightEditor {
 
   static _editorType = AnnotationEditorType.UNDERLINE;
 
+  // Default to red instead of inheriting the highlight (yellow) color.
+  static _defaultColor = "#ff0000";
+
   constructor(params) {
-    super({ ...params, markupType: "underline" });
+    super({
+      ...params,
+      markupType: "underline",
+      color: params.color || UnderlineEditor._defaultColor,
+    });
   }
 }
 
@@ -1120,8 +1157,15 @@ class StrikeOutEditor extends HighlightEditor {
 
   static _editorType = AnnotationEditorType.STRIKEOUT;
 
+  // Default to red instead of inheriting the highlight (yellow) color.
+  static _defaultColor = "#ff0000";
+
   constructor(params) {
-    super({ ...params, markupType: "strikeout" });
+    super({
+      ...params,
+      markupType: "strikeout",
+      color: params.color || StrikeOutEditor._defaultColor,
+    });
   }
 }
 
