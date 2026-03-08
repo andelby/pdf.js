@@ -400,6 +400,16 @@ class AnnotationFactory {
             );
           }
           break;
+        case AnnotationEditorType.UNDERLINE:
+          promises.push(
+            UnderlineAnnotation.createNewAnnotation(xref, annotation, changes)
+          );
+          break;
+        case AnnotationEditorType.STRIKEOUT:
+          promises.push(
+            StrikeOutAnnotation.createNewAnnotation(xref, annotation, changes)
+          );
+          break;
         case AnnotationEditorType.INK:
           promises.push(
             InkAnnotation.createNewAnnotation(xref, annotation, changes)
@@ -4960,6 +4970,39 @@ class UnderlineAnnotation extends MarkupAnnotation {
   get overlaysTextContent() {
     return true;
   }
+
+  static createNewDict(annotation, xref, _params) {
+    const {
+      color,
+      date,
+      oldAnnotation,
+      opacity,
+      rect,
+      rotation,
+      user,
+      quadPoints,
+    } = annotation;
+    const underline = oldAnnotation || new Dict(xref);
+    underline.setIfNotExists("Type", Name.get("Annot"));
+    underline.setIfNotExists("Subtype", Name.get("Underline"));
+    underline.set(
+      oldAnnotation ? "M" : "CreationDate",
+      `D:${getModificationDate(date)}`
+    );
+    underline.setIfArray("Rect", rect);
+    underline.setIfNotExists("F", 4);
+    underline.setIfNotExists("Border", [0, 0, 0]);
+    underline.setIfNumber("Rotate", rotation);
+    underline.setIfArray("QuadPoints", quadPoints);
+    underline.setIfArray("C", getPdfColorArray(color));
+    underline.setIfNumber("CA", opacity);
+    underline.setIfDefined("T", stringToAsciiOrUTF16BE(user));
+    return underline;
+  }
+
+  static async createNewAppearanceStream(_annotation, _xref, _params) {
+    return null;
+  }
 }
 
 class SquigglyAnnotation extends MarkupAnnotation {
@@ -5044,6 +5087,39 @@ class StrikeOutAnnotation extends MarkupAnnotation {
 
   get overlaysTextContent() {
     return true;
+  }
+
+  static createNewDict(annotation, xref, _params) {
+    const {
+      color,
+      date,
+      oldAnnotation,
+      opacity,
+      rect,
+      rotation,
+      user,
+      quadPoints,
+    } = annotation;
+    const strikeout = oldAnnotation || new Dict(xref);
+    strikeout.setIfNotExists("Type", Name.get("Annot"));
+    strikeout.setIfNotExists("Subtype", Name.get("StrikeOut"));
+    strikeout.set(
+      oldAnnotation ? "M" : "CreationDate",
+      `D:${getModificationDate(date)}`
+    );
+    strikeout.setIfArray("Rect", rect);
+    strikeout.setIfNotExists("F", 4);
+    strikeout.setIfNotExists("Border", [0, 0, 0]);
+    strikeout.setIfNumber("Rotate", rotation);
+    strikeout.setIfArray("QuadPoints", quadPoints);
+    strikeout.setIfArray("C", getPdfColorArray(color));
+    strikeout.setIfNumber("CA", opacity);
+    strikeout.setIfDefined("T", stringToAsciiOrUTF16BE(user));
+    return strikeout;
+  }
+
+  static async createNewAppearanceStream(_annotation, _xref, _params) {
+    return null;
   }
 }
 

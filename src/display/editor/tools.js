@@ -1347,6 +1347,24 @@ class AnnotationEditorUIManager {
   }
 
   highlightSelection(methodOfCreation = "", comment = false) {
+    this.#markupSelection(
+      methodOfCreation,
+      AnnotationEditorType.HIGHLIGHT,
+      comment
+    );
+  }
+
+  underlineSelection(methodOfCreation = "") {
+    this.#markupSelection(methodOfCreation, AnnotationEditorType.UNDERLINE);
+    console.warn("UNDERLINE selection")
+  }
+
+  strikeoutSelection(methodOfCreation = "") {
+    this.#markupSelection(methodOfCreation, AnnotationEditorType.STRIKEOUT);
+    console.warn("STRIKEOUT selection")
+  }
+
+  #markupSelection(methodOfCreation, editorType, comment = false) {
     const selection = document.getSelection();
     if (!selection || selection.isCollapsed) {
       return;
@@ -1381,10 +1399,14 @@ class AnnotationEditorUIManager {
       }
     };
     if (isNoneMode) {
-      this.switchToMode(AnnotationEditorType.HIGHLIGHT, callback);
+      this.switchToMode(editorType, callback);
       return;
     }
-    callback();
+    if (this.#mode === editorType) {
+      callback();
+    } else {
+      this.switchToMode(editorType, callback);
+    }
   }
 
   commentSelection(methodOfCreation = "") {
@@ -1496,19 +1518,27 @@ class AnnotationEditorUIManager {
 
     if (
       this.#mode !== AnnotationEditorType.HIGHLIGHT &&
+      this.#mode !== AnnotationEditorType.UNDERLINE &&
+      this.#mode !== AnnotationEditorType.STRIKEOUT &&
       this.#mode !== AnnotationEditorType.NONE
     ) {
       return;
     }
 
-    if (this.#mode === AnnotationEditorType.HIGHLIGHT) {
+    if (
+      this.#mode === AnnotationEditorType.HIGHLIGHT ||
+      this.#mode === AnnotationEditorType.UNDERLINE ||
+      this.#mode === AnnotationEditorType.STRIKEOUT
+    ) {
       this.showAllEditors("highlight", true, /* updateButton = */ true);
     }
 
     this.#highlightWhenShiftUp = this.isShiftKeyDown;
     if (!this.isShiftKeyDown) {
       const activeLayer =
-        this.#mode === AnnotationEditorType.HIGHLIGHT
+        this.#mode === AnnotationEditorType.HIGHLIGHT ||
+        this.#mode === AnnotationEditorType.UNDERLINE ||
+        this.#mode === AnnotationEditorType.STRIKEOUT
           ? this.#getLayerForTextLayer(textLayer)
           : null;
       activeLayer?.toggleDrawing();
@@ -1543,6 +1573,10 @@ class AnnotationEditorUIManager {
   #onSelectEnd(methodOfCreation = "") {
     if (this.#mode === AnnotationEditorType.HIGHLIGHT) {
       this.highlightSelection(methodOfCreation);
+    } else if (this.#mode === AnnotationEditorType.UNDERLINE) {
+      this.underlineSelection(methodOfCreation);
+    } else if (this.#mode === AnnotationEditorType.STRIKEOUT) {
+      this.strikeoutSelection(methodOfCreation);
     } else if (this.#enableHighlightFloatingButton) {
       this.#displayFloatingToolbar();
     }

@@ -72,6 +72,8 @@ class HighlightEditor extends AnnotationEditor {
 
   #methodOfCreation = "";
 
+  #markupType = "highlight"; // "highlight" | "underline" | "strikeout"
+
   static _defaultColor = null;
 
   static _defaultOpacity = 1;
@@ -109,6 +111,7 @@ class HighlightEditor extends AnnotationEditor {
     this.opacity = params.opacity || HighlightEditor._defaultOpacity;
     this.#boxes = params.boxes || null;
     this.#methodOfCreation = params.methodOfCreation || "";
+    this.#markupType = params.markupType || "highlight";
     this.#text = params.text || "";
     this._isDraggable = false;
     this.defaultL10nId = "pdfjs-editor-highlight-editor";
@@ -555,6 +558,8 @@ class HighlightEditor extends AnnotationEditor {
         rootClass: {
           highlight: true,
           free: this.#isFreeHighlight,
+          underline: this.#markupType === "underline",
+          strikeout: this.#markupType === "strikeout",
         },
         path: {
           d: this.#highlightOutlines.toSVGPath(),
@@ -630,6 +635,9 @@ class HighlightEditor extends AnnotationEditor {
     }
 
     const div = super.render();
+    if (this.#markupType !== "highlight") {
+      div.classList.add(this.#markupType); // "underline" or "strikeout"
+    }
     if (this.#text) {
       div.setAttribute("aria-label", this.#text);
       div.setAttribute("role", "mark");
@@ -1097,4 +1105,24 @@ class HighlightEditor extends AnnotationEditor {
   }
 }
 
-export { HighlightEditor };
+class UnderlineEditor extends HighlightEditor {
+  static _type = "underline";
+
+  static _editorType = AnnotationEditorType.UNDERLINE;
+
+  constructor(params) {
+    super({ ...params, markupType: "underline" });
+  }
+}
+
+class StrikeOutEditor extends HighlightEditor {
+  static _type = "strikeout";
+
+  static _editorType = AnnotationEditorType.STRIKEOUT;
+
+  constructor(params) {
+    super({ ...params, markupType: "strikeout" });
+  }
+}
+
+export { HighlightEditor, StrikeOutEditor, UnderlineEditor };

@@ -113,6 +113,38 @@
     }
   }
 
+  .underline,
+  .strikeout {
+    position: relative;
+    margin: -1px;
+    padding: 1px;
+  }
+
+  .underline::after,
+  .strikeout::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    pointer-events: none;
+    background-color: currentColor;
+  }
+
+  .underline::after {
+    height: 1px;
+    bottom: 0.1em;    /* tweak to match your font */
+  }
+
+  .strikeout::after {
+    height: 1px;
+    top: 50%;
+    transform: translateY(-50%);
+  } 
+
+  .underline.selected::after,
+  .strikeout.selected::after {
+    background-color: red; /* or any 'selected' color */
+  }
   ::selection {
     /* stylelint-disable declaration-block-no-duplicate-properties */
     /*#if !MOZCENTRAL*/

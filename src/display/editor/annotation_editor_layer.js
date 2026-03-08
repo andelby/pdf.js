@@ -32,7 +32,7 @@ import {
 } from "../../shared/util.js";
 import { AnnotationEditor } from "./editor.js";
 import { FreeTextEditor } from "./freetext.js";
-import { HighlightEditor } from "./highlight.js";
+import { HighlightEditor, StrikeOutEditor, UnderlineEditor } from "./highlight.js";
 import { InkEditor } from "./ink.js";
 import { setLayerDimensions } from "../display_utils.js";
 import { SignatureEditor } from "./signature.js";
@@ -103,6 +103,8 @@ class AnnotationEditorLayer {
       InkEditor,
       StampEditor,
       HighlightEditor,
+      UnderlineEditor,
+      StrikeOutEditor,
       SignatureEditor,
     ].map(type => [type._editorType, type])
   );
@@ -223,6 +225,8 @@ class AnnotationEditorLayer {
         this.enableClick();
         break;
       case AnnotationEditorType.HIGHLIGHT:
+      case AnnotationEditorType.UNDERLINE:
+      case AnnotationEditorType.STRIKEOUT:
         this.enableTextSelection();
         this.togglePointerEvents(false);
         this.disableClick();
@@ -490,6 +494,7 @@ class AnnotationEditorLayer {
     }
   }
 
+  
   disableTextSelection() {
     this.div.tabIndex = 0;
     if (this.#textLayer?.div && this.#textSelectionAC) {
@@ -514,6 +519,12 @@ class AnnotationEditorLayer {
       const { isMac } = FeatureTest.platform;
       if (event.button !== 0 || (event.ctrlKey && isMac)) {
         // Do nothing on right click.
+        return;
+      }
+      if (
+        this.#uiManager.getMode() !== AnnotationEditorType.HIGHLIGHT
+      ) {
+        // UNDERLINE/STRIKEOUT use text-selection only; no free-draw.
         return;
       }
       this.#uiManager.showAllEditors(

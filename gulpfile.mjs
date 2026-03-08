@@ -1060,7 +1060,12 @@ function preprocessHTML(source, defines) {
 }
 
 function buildGeneric(defines, dir) {
-  fs.rmSync(dir, { recursive: true, force: true });
+  // SwiftPDF: dir is a junction target – delete contents only, not the dir itself.
+  if (fs.existsSync(dir)) {
+    for (const entry of fs.readdirSync(dir)) {
+      fs.rmSync(`${dir}/${entry}`, { recursive: true, force: true });
+    }
+  }
 
   return ordered([
     createMainBundle(defines).pipe(gulp.dest(dir + "build")),

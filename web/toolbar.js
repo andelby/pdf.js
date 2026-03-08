@@ -277,6 +277,14 @@ class Toolbar {
         case AnnotationEditorType.HIGHLIGHT:
           editorHighlightButton.click();
           break;
+        case AnnotationEditorType.UNDERLINE:
+        case AnnotationEditorType.STRIKEOUT:
+          // No dedicated toolbar button — dispatch the mode switch directly.
+          eventBus.dispatch("switchannotationeditormode", {
+            source: this,
+            mode,
+          });
+          break;
       }
     });
     eventBus._on("toolbardensity", this.#updateToolbarDensity.bind(this));

@@ -1458,6 +1458,7 @@ class PDFViewer {
     });
 
     if (postponeDrawing) {
+      clearTimeout(this.#scaleTimeoutId);
       this.#scaleTimeoutId = setTimeout(() => {
         this.#scaleTimeoutId = null;
         this.refresh();
@@ -1468,34 +1469,39 @@ class PDFViewer {
     this._currentScale = newScale;
 
     if (!noScroll) {
-      let page = this._currentPageNumber,
-        dest;
-      if (
-        this._location &&
-        !(this.isInPresentationMode || this.isChangingPresentationMode)
-      ) {
-        page = this._location.pageNumber;
-        dest = [
-          null,
-          { name: "XYZ" },
-          this._location.left,
-          this._location.top,
-          null,
-        ];
-      }
-      this.scrollPageIntoView({
-        pageNumber: page,
-        destArray: dest,
-        allowNegativeOffset: true,
-      });
       if (Array.isArray(origin)) {
-        // If the origin of the scaling transform is specified, preserve its
-        // location on screen. If not specified, scaling will fix the top-left
-        // corner of the visible PDF area.
+        // Zoom around a specific point: keep `origin` visually fixed.
+        // We skip scrollPageIntoView entirely — it repositions to the current
+        // page using a saved location and breaks the zoom anchor.
+        // The correct formula accounts for the current scroll offset so the
+        // cursor stays over the same content point after the scale change.
         const scaleDiff = newScale / previousScale - 1;
         const [top, left] = this.containerTopLeft;
-        this.container.scrollLeft += (origin[0] - left) * scaleDiff;
-        this.container.scrollTop += (origin[1] - top) * scaleDiff;
+        this.container.scrollLeft +=
+          (this.container.scrollLeft + origin[0] - left) * scaleDiff;
+        this.container.scrollTop +=
+          (this.container.scrollTop + origin[1] - top) * scaleDiff;
+      } else {
+        let page = this._currentPageNumber,
+          dest;
+        if (
+          this._location &&
+          !(this.isInPresentationMode || this.isChangingPresentationMode)
+        ) {
+          page = this._location.pageNumber;
+          dest = [
+            null,
+            { name: "XYZ" },
+            this._location.left,
+            this._location.top,
+            null,
+          ];
+        }
+        this.scrollPageIntoView({
+          pageNumber: page,
+          destArray: dest,
+          allowNegativeOffset: true,
+        });
       }
     }
 
@@ -2422,7 +2428,7 @@ class PDFViewer {
     }
     let newScale = this._currentScale;
     if (scaleFactor > 0 && scaleFactor !== 1) {
-      newScale = Math.round(newScale * scaleFactor * 100) / 100;
+      newScale = Math.round(newScale * scaleFactor * 10000) / 10000;
     } else if (steps) {
       const delta = steps > 0 ? DEFAULT_SCALE_DELTA : 1 / DEFAULT_SCALE_DELTA;
       const round = steps > 0 ? Math.ceil : Math.floor;

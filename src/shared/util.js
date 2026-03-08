@@ -73,6 +73,8 @@ const AnnotationEditorType = {
   NONE: 0,
   FREETEXT: 3,
   HIGHLIGHT: 9,
+  UNDERLINE: 10,
+  STRIKEOUT: 12,
   STAMP: 13,
   INK: 15,
   POPUP: 16,

@@ -1,0 +1,134 @@
+/* SwiftPDF visual overrides — loaded after viewer.css */
+
+/* ── Transparent background ──────────────────────────────────────────────── */
+
+:root {
+  --body-bg-color: transparent;
+  /* toolbar is hidden in SwiftPDF; collapse the reserved space */
+  --toolbar-height: 0px;
+}
+
+body {
+  background-color: transparent !important;
+  /* disable CSS-Scrollbars spec so ::-webkit-scrollbar rules take effect */
+  scrollbar-color: unset;
+}
+
+/* ── GPU acceleration ────────────────────────────────────────────────────── */
+/*
+ * Promote the viewer and its container to their own compositor layers so the
+ * browser can handle scroll and CSS-variable-driven scale changes on the GPU
+ * without touching the main thread.
+ */
+
+#viewerContainer {
+  will-change: scroll-position;
+}
+
+.pdfViewer {
+  will-change: transform;
+}
+
+/* ── Windows 11-style scrollbar ─────────────────────────────────────────── */
+/*
+ * Track gutter is always 10 px wide (reserved by the browser).
+ * The VISIBLE portion is controlled by a transparent border + background-clip:
+ *
+ *   idle              border: 5px → 0 px visible  (hidden)
+ *   swiftpdf-scrolling border: 3px → 4 px visible  (thin)
+ *   swiftpdf-expanded  border: 1px → 8 px visible  (full)
+ *
+ * JS in pdfjs_api_bridge.js toggles these classes on #viewerContainer.
+ */
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+/* track: invisible by default */
+::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 10px;
+}
+
+/* thumb: hidden by default */
+::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 10px;
+  border: 5px solid transparent;
+  background-clip: padding-box;
+}
+
+/* ── thin state (scrolling, not over bar) ── */
+
+#viewerContainer.swiftpdf-scrolling::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+#viewerContainer.swiftpdf-scrolling::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.3);
+  border: 3px solid transparent;          /* visible width: 10-6 = 4 px */
+  background-clip: padding-box;
+}
+
+/* ── expanded state (mouse over scrollbar gutter) ── */
+
+#viewerContainer.swiftpdf-expanded::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+#viewerContainer.swiftpdf-expanded::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.5);
+  border: 1px solid transparent;          /* visible width: 10-2 = 8 px */
+  background-clip: padding-box;
+}
+
+#viewerContainer.swiftpdf-expanded::-webkit-scrollbar-thumb:active {
+  background-color: rgba(0, 0, 0, 0.65);
+  border: 1px solid transparent;
+  background-clip: padding-box;
+}
+
+/* ── dark mode ── */
+
+@media (prefers-color-scheme: dark) {
+  #viewerContainer.swiftpdf-scrolling::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  #viewerContainer.swiftpdf-scrolling::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.3);
+  }
+
+  #viewerContainer.swiftpdf-expanded::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  #viewerContainer.swiftpdf-expanded::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.5);
+  }
+
+  #viewerContainer.swiftpdf-expanded::-webkit-scrollbar-thumb:active {
+    background-color: rgba(255, 255, 255, 0.65);
+  }
+}
+
+/* ── Underline / StrikeOut annotation editor visuals ── */
+/* The highlight SVG covers the full text box. Use clip-path to show only
+   the relevant strip, and normal blend mode for a solid opaque line. */
+
+.canvasWrapper svg.highlight.underline,
+.canvasWrapper svg.highlight.strikeout {
+  mix-blend-mode: normal;
+}
+
+/* Show only the bottom ~12% of the line box as the underline strip */
+.canvasWrapper svg.highlight.underline {
+  clip-path: inset(88% 0 0 0);
+}
+
+/* Show only the middle ~14% of the line box as the strikeout strip */
+.canvasWrapper svg.highlight.strikeout {
+  clip-path: inset(43% 0 43% 0);
+}
