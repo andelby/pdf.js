@@ -124,3 +124,29 @@ body {
 .canvasWrapper svg.highlight.strikeout {
   mix-blend-mode: normal;
 }
+
+/* ── Annotation layer: pass pointer events through annotation sections ── */
+/* Highlight, underline and strikeout sections sit on top of the text layer.
+   With pointer-events: none, document.elementFromPoint() skips them and
+   returns the text span underneath, so the smart-cursor code correctly
+   detects hoverable/selectable text and pan mode is not triggered over text.
+   These sections are hidden by the editor layer anyway when annotation mode
+   is active (element.hide() is called during deserialization). */
+
+.annotationLayer .highlightAnnotation,
+.annotationLayer .underlineAnnotation,
+.annotationLayer .strikeoutAnnotation {
+  pointer-events: none;
+}
+
+/* ── Annotation editor layer: expand hit area for underline/strikeout ── */
+/* The editor div class is "highlightEditor underline" / "highlightEditor strikeout"
+   (name is always "highlightEditor"; the second class is added by render()).
+   The .internal div has an inline clip-path that clips pointer events to the
+   ~1 px visual strip.  Remove it so the full expanded editor bbox (set by the
+   JS #createOutlines fix) responds to clicks in annotation mode. */
+
+.annotationEditorLayer .highlightEditor.underline .internal,
+.annotationEditorLayer .highlightEditor.strikeout .internal {
+  clip-path: none !important;
+}

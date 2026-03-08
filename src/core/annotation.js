@@ -4937,6 +4937,10 @@ class UnderlineAnnotation extends MarkupAnnotation {
   constructor(params) {
     super(params);
 
+    this.data.isEditable = !this.data.noHTML;
+    // We want to be able to add mouse listeners to the annotation.
+    this.data.noHTML = false;
+
     const { dict, xref } = params;
 
     const quadPoints = (this.data.quadPoints = getQuadPoints(dict, null));
@@ -5053,6 +5057,10 @@ class SquigglyAnnotation extends MarkupAnnotation {
 class StrikeOutAnnotation extends MarkupAnnotation {
   constructor(params) {
     super(params);
+
+    this.data.isEditable = !this.data.noHTML;
+    // We want to be able to add mouse listeners to the annotation.
+    this.data.noHTML = false;
 
     const { dict, xref } = params;
 

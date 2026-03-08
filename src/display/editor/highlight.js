@@ -27,6 +27,8 @@ import {
 import {
   HighlightAnnotationElement,
   InkAnnotationElement,
+  StrikeOutAnnotationElement,
+  UnderlineAnnotationElement,
 } from "../annotation_layer.js";
 import { noContextMenu, stopEvent } from "../display_utils.js";
 import { AnnotationEditor } from "./editor.js";
@@ -73,6 +75,10 @@ class HighlightEditor extends AnnotationEditor {
   #methodOfCreation = "";
 
   #markupType = "highlight"; // "highlight" | "underline" | "strikeout"
+
+  // For underline/strikeout: bbox of the thin SVG strip (used by draw layer).
+  // this.x/y/width/height is expanded to full line height for the hit area.
+  #stripBbox = null;
 
   static _defaultColor = null;
 
@@ -169,13 +175,25 @@ class HighlightEditor extends AnnotationEditor {
     if (!boxes) {
       return boxes;
     }
-    if (this.#markupType === "underline") {
-      // Zero-height strip at 90 % of the line; HighlightOutliner's borderWidth
-      // expands it symmetrically to give a uniform ~1.6 px line on every line.
-      return boxes.map(b => ({ x: b.x, y: b.y + b.height * 0.91, width: b.width, height: 0 }));
-    }
-    if (this.#markupType === "strikeout") {
-      return boxes.map(b => ({ x: b.x, y: b.y + b.height * 0.50, width: b.width, height: 0 }));
+    if (this.#markupType === "underline" || this.#markupType === "strikeout") {
+      // Normalise all strips to the same horizontal extent (minX…maxRight) so
+      // that every line in a multi-line selection has identical width.
+      const minX = Math.min(...boxes.map(b => b.x));
+      const maxRight = Math.max(...boxes.map(b => b.x + b.width));
+      const width = maxRight - minX;
+      // HighlightOutliner quantises y-coordinates to EPSILON = 1e-4 using
+      // Math.floor / Math.ceil.  For a zero-height strip the rendered height
+      // is 2*bw rounded up or down by up to 1 EPSILON depending on where the
+      // strip lands sub-EPSILON — making some lines appear thicker than others.
+      // Snapping y to the nearest EPSILON boundary before the outliner sees it
+      // guarantees that floor(y-bw) and ceil(y+bw) are exact, so every strip
+      // gets exactly 2*bw height (bw is already a whole multiple of EPSILON).
+      const SNAP = 1e-4;
+      const snap = v => Math.round(v / SNAP) * SNAP;
+      if (this.#markupType === "underline") {
+        return boxes.map(b => ({ x: minX, y: snap(b.y + b.height * 0.91), width, height: 0 }));
+      }
+      return boxes.map(b => ({ x: minX, y: snap(b.y + b.height * 0.50), width, height: 0 }));
     }
     return boxes;
   }
@@ -196,6 +214,21 @@ class HighlightEditor extends AnnotationEditor {
     );
     this.#highlightOutlines = outliner.getOutlines();
     [this.x, this.y, this.width, this.height] = this.#highlightOutlines.box;
+
+    if (this.#markupType === "underline" || this.#markupType === "strikeout") {
+      // Keep the strip bbox for SVG positioning (draw layer), then widen the
+      // editor div to cover the full text-line height so the annotation is
+      // easy to click in annotation mode.
+      this.#stripBbox = [...this.#highlightOutlines.box];
+      const minX = Math.min(...this.#boxes.map(b => b.x));
+      const minY = Math.min(...this.#boxes.map(b => b.y));
+      const maxRight = Math.max(...this.#boxes.map(b => b.x + b.width));
+      const maxBottom = Math.max(...this.#boxes.map(b => b.y + b.height));
+      this.x = minX;
+      this.y = minY;
+      this.width = maxRight - minX;
+      this.height = maxBottom - minY;
+    }
 
     const outlinerForOutline = new HighlightOutliner(
       boxes,
@@ -639,8 +672,10 @@ class HighlightEditor extends AnnotationEditor {
       box = HighlightEditor.#rotateBbox(this.#highlightOutlines.box, angle);
     } else {
       // An highlight annotation is always drawn horizontally.
+      // For underline/strikeout use #stripBbox (the thin SVG strip bbox);
+      // this.x/y/width/height is the expanded editor div bbox for hit area.
       box = HighlightEditor.#rotateBbox(
-        [this.x, this.y, this.width, this.height],
+        this.#stripBbox ?? [this.x, this.y, this.width, this.height],
         angle
       );
     }
@@ -942,6 +977,80 @@ class HighlightEditor extends AnnotationEditor {
       } = data;
       initialData = data = {
         annotationType: AnnotationEditorType.HIGHLIGHT,
+        color: Array.from(color),
+        opacity,
+        quadPoints,
+        boxes: null,
+        pageIndex: pageNumber - 1,
+        rect: rect.slice(0),
+        rotation,
+        annotationElementId: id,
+        id,
+        deleted: false,
+        popupRef,
+        richText,
+        comment: contentsObj?.str || null,
+        creationDate,
+        modificationDate,
+      };
+    } else if (data instanceof UnderlineAnnotationElement) {
+      const {
+        data: {
+          quadPoints,
+          rect,
+          rotation,
+          id,
+          color,
+          opacity,
+          popupRef,
+          richText,
+          contentsObj,
+          creationDate,
+          modificationDate,
+        },
+        parent: {
+          page: { pageNumber },
+        },
+      } = data;
+      initialData = data = {
+        annotationType: AnnotationEditorType.UNDERLINE,
+        color: Array.from(color),
+        opacity,
+        quadPoints,
+        boxes: null,
+        pageIndex: pageNumber - 1,
+        rect: rect.slice(0),
+        rotation,
+        annotationElementId: id,
+        id,
+        deleted: false,
+        popupRef,
+        richText,
+        comment: contentsObj?.str || null,
+        creationDate,
+        modificationDate,
+      };
+    } else if (data instanceof StrikeOutAnnotationElement) {
+      const {
+        data: {
+          quadPoints,
+          rect,
+          rotation,
+          id,
+          color,
+          opacity,
+          popupRef,
+          richText,
+          contentsObj,
+          creationDate,
+          modificationDate,
+        },
+        parent: {
+          page: { pageNumber },
+        },
+      } = data;
+      initialData = data = {
+        annotationType: AnnotationEditorType.STRIKEOUT,
         color: Array.from(color),
         opacity,
         quadPoints,

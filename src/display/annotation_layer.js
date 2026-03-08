@@ -3545,6 +3545,7 @@ class UnderlineAnnotationElement extends AnnotationElement {
       ignoreBorder: true,
       createQuadrilaterals: true,
     });
+    this.annotationEditorType = AnnotationEditorType.UNDERLINE;
   }
 
   render() {
@@ -3607,6 +3608,7 @@ class StrikeOutAnnotationElement extends AnnotationElement {
       ignoreBorder: true,
       createQuadrilaterals: true,
     });
+    this.annotationEditorType = AnnotationEditorType.STRIKEOUT;
   }
 
   render() {
@@ -4180,4 +4182,6 @@ export {
   HighlightAnnotationElement,
   InkAnnotationElement,
   StampAnnotationElement,
+  StrikeOutAnnotationElement,
+  UnderlineAnnotationElement,
 };
