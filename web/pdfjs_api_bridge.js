@@ -833,74 +833,93 @@ window.pdfViewerAPI = pdfViewerAPI
 })()
 
 // ── Smooth continuous zoom ────────────────────────────────────────────────────
-// Intercepts Ctrl+scroll before pdf.js and drives smooth zoom by calling
-// pdfViewer.updateScale() in a requestAnimationFrame loop:
+// Intercepts Ctrl+scroll before pdf.js and animates zoom using a CSS transform
+// on #viewerContainer (zero layout reflow, hardware-accelerated).  A single
+// real updateScale() call is made only when the gesture ends.
 //
-//  • Each wheel event updates `logTarget` (absolute log-scale target).
-//  • A rAF loop lerps the current pdf.js scale toward exp(logTarget) each
-//    frame, passing drawingDelay:400 so canvas re-render is debounced.
-//  • Our #setScaleUpdatePages patch keeps the cursor point visually fixed by
-//    adjusting scrollTop proportionally on every updateScale call.
-//  • When converged, a final updateScale with drawingDelay:0 triggers the
-//    quality re-render.
+// Why CSS transform instead of per-frame updateScale():
+//   Calling updateScale() 60×/s changes CSS layout variables and adjusts
+//   scrollTop/Left on every frame.  The scroll corrections interact with the
+//   browser's own layout engine and produce visible vertical oscillation.
+//   A CSS transform is applied entirely on the compositor thread — no reflow,
+//   no scroll-position changes during the gesture, no jiggle.
 //
-// Advantages over CSS-transform approach:
-//   – No "commit flash": zoom smoothly converges, no abrupt layout swap.
-//   – No transform/scroll coordinate mismatch.
-//   – Works identically for touchpad and mouse wheel.
+// Flow:
+//  • Gesture start (first Ctrl+wheel event):
+//      – record baseLogScale = log(pv.currentScale)
+//      – fix transform-origin to the cursor position in the container
+//  • Each wheel event: accumulate delta into logTarget
+//  • rAF loop: lerp logCurrent → logTarget; apply transform: scale()
+//  • Commit (idle > COMMIT_DELAY ms, or logGap < CONVERGE_THR):
+//      – remove CSS transform  ]  same synchronous JS block
+//      – call updateScale() once ]  → browser batches into one paint, no flash
 ;(function initSmoothZoom() {
 
-  const TOUCHPAD_DIV  = 300    // px deltaY per log-scale unit
-  const WHEEL_STEP    = 0.15   // log-scale per mouse-wheel notch (≈16 %)
-  const LERP_FACTOR   = 0.15   // fraction of remaining log-gap closed per frame
-  const CONVERGE_THR  = 0.0005 // log-scale distance considered "arrived"
-  const DRAW_DELAY    = 400    // canvas re-render debounce ms during gesture
+  const WHEEL_STEP   = 0.15    // log-scale per mouse-wheel notch (≈16 %)
+  const LERP_FACTOR  = 0.20    // fraction of remaining log-gap closed per frame
+  const CONVERGE_THR = 0.0008  // commit when gap is below this threshold
+  const COMMIT_DELAY = 150     // ms of wheel-event silence before forced commit
+  const CLAMP_MIN    = Math.log(0.1)
+  const CLAMP_MAX    = Math.log(10)
 
   function setup() {
-    let logTarget = null    // null = idle; otherwise absolute log-scale target
-    let lastVP    = [0, 0]  // cursor viewport coords (zoom origin, updated each event)
-    let rafId     = null
+    let baseLogScale    = null  // log(pv.currentScale) at gesture start
+    let logCurrent      = null  // log-scale currently shown by CSS transform
+    let logTarget       = null  // desired log-scale (null = idle)
+    let gestureOriginVP = null  // [clientX, clientY] zoom anchor (for commit)
+    let lastWheelTime   = -Infinity
+    let rafId           = null
 
-    const getViewer = () => window.PDFViewerApplication?.pdfViewer
+    const getViewer    = () => window.PDFViewerApplication?.pdfViewer
+    const getContainer = () => document.getElementById('viewerContainer')
 
-    function clampLog(ls) {
-      return Math.min(Math.log(10), Math.max(Math.log(0.1), ls))
+    function clamp(ls) { return Math.min(CLAMP_MAX, Math.max(CLAMP_MIN, ls)) }
+
+    // Remove CSS transform and apply the accumulated scale change in one
+    // synchronous block so the browser never paints an intermediate state.
+    function commit() {
+      if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null }
+
+      const pv = getViewer()
+      const c  = getContainer()
+
+      // 1. Remove CSS transform (DOM write — no reflow yet)
+      if (c) { c.style.transform = ''; c.style.transformOrigin = '' }
+
+      // 2. Apply real PDF.js scale.  updateScale() reads scrollLeft/Top which
+      //    forces a single reflow; at that point the transform is already gone
+      //    and the new CSS variable is applied, so the calculation is correct.
+      if (pv?.pdfDocument && logTarget !== null) {
+        const scaleFactor = Math.exp(logTarget - baseLogScale)
+        if (Math.abs(scaleFactor - 1) > 1e-6) {
+          pv.updateScale({ scaleFactor, drawingDelay: 0, origin: gestureOriginVP })
+        }
+      }
+
+      // Reset gesture state
+      baseLogScale    = null
+      logCurrent      = null
+      logTarget       = null
+      gestureOriginVP = null
     }
 
     function animateFrame() {
       rafId = null
-      const pv = getViewer()
-      if (!pv?.pdfDocument || logTarget === null) return
+      if (logTarget === null) return
 
-      const logCurrent = Math.log(pv.currentScale)
-      const diff       = logTarget - logCurrent
+      const diff = logTarget - logCurrent
+      const idle = performance.now() - lastWheelTime > COMMIT_DELAY
 
-      if (Math.abs(diff) <= CONVERGE_THR) {
-        // Close enough — snap to exact target and trigger quality re-render
-        const finalScale  = Math.exp(logTarget)
-        const scaleFactor = finalScale / pv.currentScale
-        logTarget = null
-        if (Math.abs(scaleFactor - 1) > 1e-8) {
-          pv.updateScale({ scaleFactor, drawingDelay: 0, origin: lastVP })
-        }
+      // Commit once converged or after the user has stopped scrolling
+      if (idle || Math.abs(diff) <= CONVERGE_THR) {
+        commit()
         return
       }
 
-      // Lerp step: move LERP_FACTOR fraction of the remaining log-gap
-      const scaleFactor = Math.exp(diff * LERP_FACTOR)
-      const prevScale   = pv.currentScale
-      pv.updateScale({ scaleFactor, drawingDelay: DRAW_DELAY, origin: lastVP })
-
-      // Guard: if rounding made the step a no-op, snap to target immediately
-      if (pv.currentScale === prevScale) {
-        const finalScale = Math.exp(logTarget)
-        const sf         = finalScale / pv.currentScale
-        logTarget = null
-        if (Math.abs(sf - 1) > 1e-8) {
-          pv.updateScale({ scaleFactor: sf, drawingDelay: 0, origin: lastVP })
-        }
-        return
-      }
+      // Lerp one step toward the target and update the CSS transform
+      logCurrent += diff * LERP_FACTOR
+      const c = getContainer()
+      if (c) c.style.transform = `scale(${Math.exp(logCurrent - baseLogScale)})`
 
       rafId = requestAnimationFrame(animateFrame)
     }
@@ -908,23 +927,34 @@ window.pdfViewerAPI = pdfViewerAPI
     window.addEventListener('wheel', function (evt) {
       if (!evt.ctrlKey) return
       const pv = getViewer()
-      if (!pv?.pdfDocument) return
+      const c  = getContainer()
+      if (!pv?.pdfDocument || !c) return
 
       // Take full ownership — pdf.js must never see this event
       evt.stopImmediatePropagation()
       evt.preventDefault()
 
-      lastVP = [evt.clientX, evt.clientY]
+      lastWheelTime = performance.now()
 
-      // Initialise logTarget from the current real scale on the first event
-      if (logTarget === null) logTarget = Math.log(pv.currentScale)
+      // First wheel event of a new gesture: initialise state and pin origin
+      if (logTarget === null) {
+        baseLogScale    = Math.log(pv.currentScale)
+        logCurrent      = baseLogScale
+        logTarget       = baseLogScale
+        gestureOriginVP = [evt.clientX, evt.clientY]
+        const rect = c.getBoundingClientRect()
+        c.style.transformOrigin =
+          `${(evt.clientX - rect.left).toFixed(1)}px ` +
+          `${(evt.clientY - rect.top).toFixed(1)}px`
+      }
 
+      // Accumulate delta into logTarget
       if (evt.deltaMode === WheelEvent.DOM_DELTA_PIXEL) {
         // ── Touchpad / precision scroll ───────────────────────────────────────
-        logTarget = clampLog(logTarget - evt.deltaY / TOUCHPAD_DIV)
+        logTarget = clamp(logTarget - evt.deltaY / 300)
       } else {
         // ── Mouse wheel ───────────────────────────────────────────────────────
-        logTarget = clampLog(logTarget - Math.sign(evt.deltaY) * WHEEL_STEP)
+        logTarget = clamp(logTarget - Math.sign(evt.deltaY) * WHEEL_STEP)
       }
 
       if (!rafId) rafId = requestAnimationFrame(animateFrame)
