@@ -2324,8 +2324,17 @@ gulp.task(
         }
       }
 
+      let host;
+      const j = process.argv.indexOf("--host");
+      if (j >= 0 && j + 1 < process.argv.length) {
+        host = process.argv[j + 1];
+        if (host === "0") {
+          host = "0.0.0.0";
+        }
+      }
+
       const { WebServer } = await import("./test/webserver.mjs");
-      const server = new WebServer({ port });
+      const server = new WebServer({ host, port });
       server.start();
     }
   )
@@ -2466,7 +2475,7 @@ function packageJson() {
     bugs: DIST_BUGS_URL,
     license: DIST_LICENSE,
     optionalDependencies: {
-      "@napi-rs/canvas": "^0.1.95",
+      "@napi-rs/canvas": "^0.1.96",
       "node-readable-to-web-readable-stream": "^0.4.2",
     },
     browser: {
