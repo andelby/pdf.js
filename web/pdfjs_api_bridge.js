@@ -833,132 +833,159 @@ window.pdfViewerAPI = pdfViewerAPI
 })()
 
 // ── Smooth continuous zoom ────────────────────────────────────────────────────
-// Intercepts Ctrl+scroll before pdf.js and animates zoom using a CSS transform
-// on #viewerContainer (zero layout reflow, hardware-accelerated).  A single
-// real updateScale() call is made only when the gesture ends.
+// Animates with CSS transform: scale() on #viewer — layout is frozen so no
+// scroll events fire and there is no bouncing.
 //
-// Why CSS transform instead of per-frame updateScale():
-//   Calling updateScale() 60×/s changes CSS layout variables and adjusts
-//   scrollTop/Left on every frame.  The scroll corrections interact with the
-//   browser's own layout engine and produce visible vertical oscillation.
-//   A CSS transform is applied entirely on the compositor thread — no reflow,
-//   no scroll-position changes during the gesture, no jiggle.
+// Commit strategy
+// ───────────────
+// Instead of a mathematical formula (which has residual error from PDF.js
+// internal padding/centering constants), we use a direct measurement approach:
 //
-// Flow:
-//  • Gesture start (first Ctrl+wheel event):
-//      – record baseLogScale = log(pv.currentScale)
-//      – fix transform-origin to the cursor position in the container
-//  • Each wheel event: accumulate delta into logTarget
-//  • rAF loop: lerp logCurrent → logTarget; apply transform: scale()
-//  • Commit (idle > COMMIT_DELAY ms, or logGap < CONVERGE_THR):
-//      – remove CSS transform  ]  same synchronous JS block
-//      – call updateScale() once ]  → browser batches into one paint, no flash
+//  1. Apply the final CSS transform (lerpScale = targetScale) so
+//     getBoundingClientRect() reads the exact last-frame visual position.
+//  2. Snapshot a reference .page element's viewport rect WITH transform active.
+//  3. Clear the transform and call pv.updateScale() to commit the new scale.
+//  4. Read the reference element's rect again WITHOUT transform (new layout).
+//  5. Scroll delta = (after - before): shifts scroll so the reference element
+//     returns to exactly the same viewport position it had in step 2.
+//
+// No assumptions about PDF.js internals — purely empirical.
 ;(function initSmoothZoom() {
 
-  const WHEEL_STEP   = 0.15    // log-scale per mouse-wheel notch (≈16 %)
-  const LERP_FACTOR  = 0.20    // fraction of remaining log-gap closed per frame
-  const CONVERGE_THR = 0.0008  // commit when gap is below this threshold
-  const COMMIT_DELAY = 150     // ms of wheel-event silence before forced commit
-  const CLAMP_MIN    = Math.log(0.1)
-  const CLAMP_MAX    = Math.log(10)
+  const MIN_SCALE = 0.1
+  const MAX_SCALE = 10.0
+
+  const MOUSE_WHEEL_STEP     = 0.07
+  const TOUCHPAD_SENSITIVITY = 0.0008
+  const LERP_SPEED           = 0.20
 
   function setup() {
-    let baseLogScale    = null  // log(pv.currentScale) at gesture start
-    let logCurrent      = null  // log-scale currently shown by CSS transform
-    let logTarget       = null  // desired log-scale (null = idle)
-    let gestureOriginVP = null  // [clientX, clientY] zoom anchor (for commit)
-    let lastWheelTime   = -Infinity
-    let rafId           = null
+    const viewer    = document.querySelector('#viewer')
+    const container = document.getElementById('viewerContainer')
+    if (!viewer || !container) return
 
-    const getViewer    = () => window.PDFViewerApplication?.pdfViewer
-    const getContainer = () => document.getElementById('viewerContainer')
+    const getPV = () => window.PDFViewerApplication?.pdfViewer
 
-    function clamp(ls) { return Math.min(CLAMP_MAX, Math.max(CLAMP_MIN, ls)) }
+    let animating     = false
+    let baseScale     = 1
+    let targetScale   = 1
+    let lerpScale     = 1
+    let rafId         = null
+    let viewerOriginX = 0   // anchor in #viewer element coords (horizontal)
+    let viewerOriginY = 0   // anchor in #viewer element coords (vertical)
 
-    // Remove CSS transform and apply the accumulated scale change in one
-    // synchronous block so the browser never paints an intermediate state.
-    function commit() {
-      if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null }
-
-      const pv = getViewer()
-      const c  = getContainer()
-
-      // 1. Remove CSS transform (DOM write — no reflow yet)
-      if (c) { c.style.transform = ''; c.style.transformOrigin = '' }
-
-      // 2. Apply real PDF.js scale.  updateScale() reads scrollLeft/Top which
-      //    forces a single reflow; at that point the transform is already gone
-      //    and the new CSS variable is applied, so the calculation is correct.
-      if (pv?.pdfDocument && logTarget !== null) {
-        const scaleFactor = Math.exp(logTarget - baseLogScale)
-        if (Math.abs(scaleFactor - 1) > 1e-6) {
-          pv.updateScale({ scaleFactor, drawingDelay: 0, origin: gestureOriginVP })
-        }
-      }
-
-      // Reset gesture state
-      baseLogScale    = null
-      logCurrent      = null
-      logTarget       = null
-      gestureOriginVP = null
+    function applyTransform(scale) {
+      const ratio = scale / baseScale
+      viewer.style.transformOrigin = `${viewerOriginX}px ${viewerOriginY}px`
+      viewer.style.transform       = `scale(${ratio})`
     }
 
-    function animateFrame() {
+    function clearTransform() {
+      viewer.style.transform       = ''
+      viewer.style.transformOrigin = ''
+    }
+
+    // First .page element at least partially visible in the viewport.
+    function findRefPage() {
+      const containerTop = container.getBoundingClientRect().top
+      for (const p of container.querySelectorAll('.page')) {
+        if (p.getBoundingClientRect().bottom > containerTop) return p
+      }
+      return null
+    }
+
+    // Commit the final scale to PDF.js and compensate scroll so the reference
+    // element (snapshotted with the CSS transform still active) stays put.
+    function commit(refEl, beforeRect) {
+      animating = false
+
+      const pv = getPV()
+      if (!pv?.pdfDocument) return
+
+      const finalScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, targetScale))
+      const ratio      = finalScale / pv.currentScale
+
+      // Remove visual transform before handing back to PDF.js.
+      clearTransform()
+
+      if (Math.abs(ratio - 1) <= 0.0001) return
+
+      pv.updateScale({ scaleFactor: ratio, noScroll: true })
+
+      if (!refEl || !beforeRect) return
+
+      // Read new layout position (forces synchronous reflow).
+      const afterRect = refEl.getBoundingClientRect()
+
+      // Compensate: shift scroll so the reference element sits at exactly the
+      // same viewport position it occupied in the last animation frame.
+      container.scrollLeft = Math.max(0, container.scrollLeft + (afterRect.left - beforeRect.left))
+      container.scrollTop  = Math.max(0, container.scrollTop  + (afterRect.top  - beforeRect.top))
+    }
+
+    function step() {
       rafId = null
-      if (logTarget === null) return
+      if (!animating) return
 
-      const diff = logTarget - logCurrent
-      const idle = performance.now() - lastWheelTime > COMMIT_DELAY
+      const diff     = targetScale - lerpScale
+      const settling = Math.abs(diff) < 0.0005
 
-      // Commit once converged or after the user has stopped scrolling
-      if (idle || Math.abs(diff) <= CONVERGE_THR) {
-        commit()
+      lerpScale = settling ? targetScale : lerpScale + diff * LERP_SPEED
+      applyTransform(lerpScale)
+
+      if (settling) {
+        // Measure beforeRect NOW — the CSS transform is active from the
+        // applyTransform() call above, matching exactly what will be painted
+        // for this frame.  commit() then clears it and compensates scroll.
+        const refEl     = findRefPage()
+        const beforeRect = refEl?.getBoundingClientRect()
+        commit(refEl, beforeRect)
         return
       }
 
-      // Lerp one step toward the target and update the CSS transform
-      logCurrent += diff * LERP_FACTOR
-      const c = getContainer()
-      if (c) c.style.transform = `scale(${Math.exp(logCurrent - baseLogScale)})`
-
-      rafId = requestAnimationFrame(animateFrame)
+      rafId = requestAnimationFrame(step)
     }
 
-    window.addEventListener('wheel', function (evt) {
+    function onWheel(evt) {
       if (!evt.ctrlKey) return
-      const pv = getViewer()
-      const c  = getContainer()
-      if (!pv?.pdfDocument || !c) return
+      const pv = getPV()
+      if (!pv?.pdfDocument) return
 
-      // Take full ownership — pdf.js must never see this event
       evt.stopImmediatePropagation()
       evt.preventDefault()
 
-      lastWheelTime = performance.now()
-
-      // First wheel event of a new gesture: initialise state and pin origin
-      if (logTarget === null) {
-        baseLogScale    = Math.log(pv.currentScale)
-        logCurrent      = baseLogScale
-        logTarget       = baseLogScale
-        gestureOriginVP = [evt.clientX, evt.clientY]
-        const rect = c.getBoundingClientRect()
-        c.style.transformOrigin =
-          `${(evt.clientX - rect.left).toFixed(1)}px ` +
-          `${(evt.clientY - rect.top).toFixed(1)}px`
-      }
-
-      // Accumulate delta into logTarget
+      let delta = 1
       if (evt.deltaMode === WheelEvent.DOM_DELTA_PIXEL) {
-        // ── Touchpad / precision scroll ───────────────────────────────────────
-        logTarget = clamp(logTarget - evt.deltaY / 300)
-      } else {
-        // ── Mouse wheel ───────────────────────────────────────────────────────
-        logTarget = clamp(logTarget - Math.sign(evt.deltaY) * WHEEL_STEP)
+        delta = 1 + (-evt.deltaY * TOUCHPAD_SENSITIVITY)
+      } else if (evt.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+        delta = 1 + (-Math.sign(evt.deltaY) * MOUSE_WHEEL_STEP)
+      } else if (evt.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+        delta = 1 + (-Math.sign(evt.deltaY) * MOUSE_WHEEL_STEP * 3)
+      }
+      if (Math.abs(delta - 1) < 0.00001) return
+
+      if (!animating) {
+        baseScale   = pv.currentScale
+        lerpScale   = baseScale
+        targetScale = baseScale
+
+        const rect = container.getBoundingClientRect()
+
+        // Cursor position in #viewer coords — zoom anchors at the pointer.
+        viewerOriginX = (evt.clientX - rect.left) + container.scrollLeft - viewer.offsetLeft
+        viewerOriginY = (evt.clientY - rect.top)  + container.scrollTop  - viewer.offsetTop
+
+        animating = true
       }
 
-      if (!rafId) rafId = requestAnimationFrame(animateFrame)
-    }, { capture: true, passive: false })
+      targetScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, targetScale * delta))
+
+      if (!rafId) {
+        rafId = requestAnimationFrame(step)
+      }
+    }
+
+    document.addEventListener('wheel', onWheel, { capture: true, passive: false })
   }
 
   if (document.readyState === 'loading')

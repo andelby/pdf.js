@@ -290,6 +290,8 @@ class PDFViewer {
 
   #copiedPageViews = null;
 
+  #ignoreScrollDuringZoom = false;
+
   /**
    * @param {PDFViewerOptions} options
    */
@@ -1446,6 +1448,10 @@ class PDFViewer {
       return;
     }
 
+    if (this.#ignoreScrollDuringZoom) {
+      noScroll = true;
+    }
+
     this.viewer.style.setProperty(
       "--scale-factor",
       newScale * PixelsPerInch.PDF_TO_CSS_UNITS
@@ -1468,7 +1474,7 @@ class PDFViewer {
     const previousScale = this._currentScale;
     this._currentScale = newScale;
 
-    if (!noScroll) {
+    if (!noScroll && !this.#ignoreScrollDuringZoom) {
       if (Array.isArray(origin)) {
         // Zoom around a specific point: keep `origin` visually fixed.
         // We skip scrollPageIntoView entirely — it repositions to the current
@@ -1648,6 +1654,9 @@ class PDFViewer {
     ignoreDestinationZoom = false,
     center = null,
   }) {
+    if (this.#ignoreScrollDuringZoom) {
+      return;
+    }
     if (!this.pdfDocument) {
       return;
     }
@@ -2455,6 +2464,10 @@ class PDFViewer {
    */
   decreaseScale(options = {}) {
     this.updateScale({ ...options, steps: -(options.steps ?? 1) });
+  }
+
+  setIgnoreScrollDuringZoom(ignore) {
+    this.#ignoreScrollDuringZoom = ignore;
   }
 
   #updateContainerHeightCss(height = this.container.clientHeight) {
