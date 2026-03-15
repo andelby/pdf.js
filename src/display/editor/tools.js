@@ -739,6 +739,12 @@ class AnnotationEditorUIManager {
 
   #mode = AnnotationEditorType.NONE;
 
+  // True when the user double-clicked an existing annotation to select it.
+  // In this state the editor mode is active (so the selection UI renders)
+  // but new annotation creation is blocked — the viewer stays in "pan + text
+  // select" mode from the user's perspective.
+  _singleSelectionMode = false;
+
   #selectedEditors = new Set();
 
   #selectedTextNode = null;
@@ -1346,25 +1352,24 @@ class AnnotationEditorUIManager {
     return null;
   }
 
-  highlightSelection(methodOfCreation = "", comment = false) {
+  highlightSelection(methodOfCreation = "", comment = false, keepCurrentMode = false) {
     this.#markupSelection(
       methodOfCreation,
       AnnotationEditorType.HIGHLIGHT,
-      comment
+      comment,
+      keepCurrentMode
     );
   }
 
-  underlineSelection(methodOfCreation = "") {
-    this.#markupSelection(methodOfCreation, AnnotationEditorType.UNDERLINE);
-    console.warn("UNDERLINE selection")
+  underlineSelection(methodOfCreation = "", keepCurrentMode = false) {
+    this.#markupSelection(methodOfCreation, AnnotationEditorType.UNDERLINE, false, keepCurrentMode);
   }
 
-  strikeoutSelection(methodOfCreation = "") {
-    this.#markupSelection(methodOfCreation, AnnotationEditorType.STRIKEOUT);
-    console.warn("STRIKEOUT selection")
+  strikeoutSelection(methodOfCreation = "", keepCurrentMode = false) {
+    this.#markupSelection(methodOfCreation, AnnotationEditorType.STRIKEOUT, false, keepCurrentMode);
   }
 
-  #markupSelection(methodOfCreation, editorType, comment = false) {
+  #markupSelection(methodOfCreation, editorType, comment = false, keepCurrentMode = false) {
     const selection = document.getSelection();
     if (!selection || selection.isCollapsed) {
       return;
@@ -2010,8 +2015,39 @@ class AnnotationEditorUIManager {
     mustEnterInEditMode = false,
     editComment = false
   ) {
-    if (this.#mode === mode) {
+    if (this.#mode === mode && !editId) {
       return;
+    }
+
+    // When switching to NONE, synchronously strip the selectedEditor CSS class
+    // from all editors BEFORE the capability await below.  The pdf_viewer.js
+    // setter calls cleanup() / toggleEditingMode() which can trigger page
+    // rebuilds; those rebuilds call HighlightEditor.setParent() which re-selects
+    // any editor whose div still carries selectedEditor — bypassing
+    // #selectedEditors so that the later unselectAll() misses it.  Removing the
+    // class here (synchronously, before any yield) prevents the spurious
+    // re-selection.
+    if (mode === AnnotationEditorType.NONE) {
+      this._singleSelectionMode = false;
+      for (const layer of this.#allLayers.values()) {
+        layer.div?.classList.remove("singleSelectionMode");
+      }
+      for (const editor of this.#allEditors.values()) {
+        editor.div?.classList.remove("selectedEditor");
+        if (editor.div) {
+          editor.div.style.pointerEvents = "";
+        }
+        // Prevent the deferred setTimeout in editor.focus() from triggering
+        // focusin → setSelected(editor) → updateToolbar → dispatch(INK, editId)
+        // after this NONE cleanup.  editor.focus() defers div.focus() via
+        // setTimeout(0); by the time that fires, #mode is already NONE, so
+        // updateToolbar would see mode≠NONE and re-dispatch single-selection
+        // mode, causing the annotation to re-select on every click-outside.
+        // Setting _focusEventsAllowed = false here (synchronously, before the
+        // await) blocks that focusin callback.  It is restored to true by
+        // editor.enable() / editor.enableEditing() in the next #enableAll().
+        editor._focusEventsAllowed = false;
+      }
     }
 
     if (this.#updateModeCapability) {
@@ -2031,7 +2067,25 @@ class AnnotationEditorUIManager {
     this.#commentManager?.destroyPopup();
 
     this.#mode = mode;
+
     if (mode === AnnotationEditorType.NONE) {
+      this._singleSelectionMode = false;
+      for (const layer of this.#allLayers.values()) {
+        layer.div?.classList.remove("singleSelectionMode");
+      }
+      // Restore pointer-events on all editors (removed inline style from
+      // single-selection mode so they behave normally in the next edit session).
+      // Also remove selectedEditor class: a concurrent updateMode(INK, editId)
+      // that was still awaiting #enableAll() when our pre-cleanup ran may have
+      // called setSelected() between the pre-cleanup and now, re-adding the
+      // class. Removing it here (post-await, after #disableAll cleans the
+      // layer) ensures the annotation is visually deselected.
+      for (const editor of this.#allEditors.values()) {
+        if (editor.div) {
+          editor.div.style.pointerEvents = "";
+          editor.div.classList.remove("selectedEditor");
+        }
+      }
       this.setEditingState(false);
       this.#disableAll();
       for (const editor of this.#allEditors.values()) {
@@ -2040,6 +2094,21 @@ class AnnotationEditorUIManager {
 
       this._editorUndoBar?.hide();
       this.toggleComment(/* editor = */ null);
+
+      // Restore _focusEventsAllowed on all editors via a macrotask so it fires
+      // AFTER any pending deferred div.focus() setTimeout(0) callbacks that
+      // were scheduled by editor.focus() during the preceding updateMode(active)
+      // call.  Those deferred callbacks are macrotasks queued before this one
+      // (FIFO), so by the time this runs they have already fired — but by then
+      // _focusEventsAllowed is false (set in the pre-cleanup above), so the
+      // focusin → setSelected → updateToolbar → dispatch(mode, editId) chain
+      // that would re-enter single-selection mode is suppressed.
+      const allEditors = this.#allEditors;
+      setTimeout(() => {
+        for (const editor of allEditors.values()) {
+          editor._focusEventsAllowed = true;
+        }
+      }, 0);
 
       this.#updateModeCapability.resolve();
       return;
@@ -2058,11 +2127,25 @@ class AnnotationEditorUIManager {
       CurrentPointers.clearPointerType();
     }
 
+    // When an editId is provided (double-click on existing annotation), enter
+    // single-selection mode: the selection UI is shown but new annotations
+    // cannot be created and the viewer behaves like pan/text-select mode.
+    // We only SET the flag here — it is cleared exclusively in the NONE branch
+    // above.  Never reset it to false here (even when editId is absent) because
+    // intermediate mode calls (toolbar syncs, params updates) with no editId
+    // must not accidentally clear single-selection mode.
+    if (editId) {
+      this._singleSelectionMode = true;
+    }
+
     this.setEditingState(true);
     await this.#enableAll();
     this.unselectAll();
     for (const layer of this.#allLayers.values()) {
       layer.updateMode(mode);
+      // Apply/remove CSS class so pointer-events CSS can block hover/click
+      // on non-selected editors while in single-selection mode.
+      layer.div?.classList.toggle("singleSelectionMode", this._singleSelectionMode);
     }
 
     if (mode === AnnotationEditorType.POPUP) {
@@ -2118,6 +2201,17 @@ class AnnotationEditorUIManager {
         }
       } else {
         editor.unselect();
+      }
+    }
+
+    // In single-selection mode, make every non-selected editor's div
+    // completely inert: no hover rectangle, no click-through selection.
+    // We use an inline style so it overrides any CSS specificity battle.
+    if (this._singleSelectionMode) {
+      for (const editor of this.#allEditors.values()) {
+        if (editor.div) {
+          editor.div.style.pointerEvents = editor.isSelected ? "" : "none";
+        }
       }
     }
 
@@ -2253,12 +2347,12 @@ class AnnotationEditorUIManager {
 
   /**
    * Get all the editors belonging to a given page.
-   * @param {number} pageIndex
+   * @param {number} [pageIndex]
    * @yields {AnnotationEditor}
    */
   *getEditors(pageIndex) {
     for (const editor of this.#allEditors.values()) {
-      if (editor.pageIndex === pageIndex) {
+      if (pageIndex === undefined || editor.pageIndex === pageIndex) {
         yield editor;
       }
     }

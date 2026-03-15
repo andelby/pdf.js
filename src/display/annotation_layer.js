@@ -880,12 +880,16 @@ class AnnotationElement {
       annotationEditorType: mode,
       data: { id: editId },
     } = this;
+    // Store data attributes so the geometry-based bridge handler can dispatch
+    // switchannotationeditormode even when pointer-events: none is set on this
+    // container (e.g. for ink annotations to allow text selection underneath).
+    this.container.dataset.swiftpdfEditMode = mode;
+    this.container.dataset.swiftpdfEditId = editId;
     this.container.addEventListener("dblclick", () => {
       this.linkService.eventBus?.dispatch("switchannotationeditormode", {
         source: this,
         mode,
         editId,
-        mustEnterInEditMode: true,
       });
     });
   }
@@ -3566,6 +3570,7 @@ class UnderlineAnnotationElement extends AnnotationElement {
       this.container.append(underline);
     }
 
+    this._editOnDoubleClick();
     return this.container;
   }
 }
@@ -3629,6 +3634,7 @@ class StrikeOutAnnotationElement extends AnnotationElement {
       this.container.append(strikeout);
     }
 
+    this._editOnDoubleClick();
     return this.container;
   }
 }

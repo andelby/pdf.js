@@ -919,6 +919,11 @@ class AnnotationEditorLayer {
       return;
     }
 
+    if (this.#uiManager._singleSelectionMode) {
+      // Single-selection mode: don't create new editors on background clicks.
+      return;
+    }
+
     this.createAndAddNewEditor(event, /* isCentered = */ false);
   }
 
@@ -927,7 +932,10 @@ class AnnotationEditorLayer {
    * @param {PointerEvent} event
    */
   pointerdown(event) {
-    if (this.#uiManager.getMode() === AnnotationEditorType.HIGHLIGHT) {
+    if (this.#uiManager.getMode() === AnnotationEditorType.HIGHLIGHT &&
+        !this.#uiManager._singleSelectionMode) {
+      // Only enable text-selection-to-highlight when NOT in single-selection
+      // mode; otherwise a text drag would create an unwanted new highlight.
       this.enableTextSelection();
     }
     if (this.#hadPointerDown) {
@@ -942,6 +950,19 @@ class AnnotationEditorLayer {
     const { isMac } = FeatureTest.platform;
     if (event.button !== 0 || (event.ctrlKey && isMac)) {
       // Do nothing on right click.
+      return;
+    }
+
+    // In single-selection mode, clicking the layer background (not on an editor)
+    // deselects the current annotation and returns to NONE (pan/text-select) mode.
+    // We dispatch through the event bus so pdf_viewer.js can run its full cleanup
+    // (toggleEditingMode, cleanup) — calling updateMode() directly would skip that
+    // and leave the annotation layer invisible.
+    if (this.#uiManager._singleSelectionMode && event.target === this.div) {
+      this.#uiManager._eventBus.dispatch("switchannotationeditormode", {
+        source: this,
+        mode: AnnotationEditorType.NONE,
+      });
       return;
     }
 

@@ -135,7 +135,8 @@ body {
 
 .annotationLayer .highlightAnnotation,
 .annotationLayer .underlineAnnotation,
-.annotationLayer .strikeoutAnnotation {
+.annotationLayer .strikeoutAnnotation,
+.annotationLayer .inkAnnotation {
   pointer-events: none;
 }
 
@@ -149,4 +150,43 @@ body {
 .annotationEditorLayer .highlightEditor.underline .internal,
 .annotationEditorLayer .highlightEditor.strikeout .internal {
   clip-path: none !important;
+}
+
+/* ── Active drawing mode: make existing editors non-interactive ──────────── */
+/* When any annotation mode is active (layer does NOT have the "nonEditing"
+ * class that NONE mode adds), existing annotation editors must be transparent
+ * to pointer events so the user can draw/highlight freely over them.
+ *
+ * IMPORTANT: "pointer-events: none" on an HTML parent does NOT block children
+ * from receiving pointer events — children with "pointer-events: auto" (the
+ * default) are still hit-testable.  InkEditor's canvas, HighlightEditor's
+ * internal div/SVG, FreeTextEditor's textarea, etc. all intercept pointerdown
+ * before the layer div sees it, causing the annotation_editor_layer.js check
+ *   `if (event.target !== this.div) return;`
+ * to bail out, preventing new drawing from starting.  We must therefore set
+ * pointer-events: none on BOTH the editor divs AND all their descendants (*).
+ *
+ * Note: PDF.js editor div classes are inkEditor / highlightEditor /
+ * freeTextEditor / stampEditor / signatureEditor — NOT "annotationEditor".
+ *
+ * The singleSelectionMode exclusion preserves the existing behaviour where the
+ * selected editor and its toolbar remain interactive. */
+.annotationEditorLayer:not(.nonEditing):not(.singleSelectionMode)
+  :is(.freeTextEditor, .inkEditor, .stampEditor, .highlightEditor, .signatureEditor),
+.annotationEditorLayer:not(.nonEditing):not(.singleSelectionMode)
+  :is(.freeTextEditor, .inkEditor, .stampEditor, .highlightEditor, .signatureEditor) * {
+  pointer-events: none !important;
+}
+
+/* ── Single-selection mode ───────────────────────────────────────────────── */
+/* When the user double-clicks an existing annotation, we enter
+ * singleSelectionMode: only the selected editor is interactive.
+ * All other editors become transparent to pointer events so they cannot be
+ * hovered or single-clicked. A second double-click is needed to switch to
+ * another annotation. */
+.annotationEditorLayer.singleSelectionMode
+  :is(.freeTextEditor, .inkEditor, .stampEditor, .highlightEditor, .signatureEditor):not(.selectedEditor),
+.annotationEditorLayer.singleSelectionMode
+  :is(.freeTextEditor, .inkEditor, .stampEditor, .highlightEditor, .signatureEditor):not(.selectedEditor) * {
+  pointer-events: none !important;
 }

@@ -163,6 +163,10 @@ class ColorPicker {
       value: color,
     });
     this.updateColor(color);
+    // Close the dropdown after picking a color. The normal close mechanism
+    // (a window-level pointerdown listener) is blocked by EditorToolbar's
+    // stopPropagation(), so the dropdown would otherwise stay open.
+    this.hideDropdown();
   }
 
   _colorSelectFromKeyboard(event) {

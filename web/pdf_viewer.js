@@ -2592,7 +2592,7 @@ class PDFViewer {
     if (!this.#annotationEditorUIManager) {
       throw new Error(`The AnnotationEditor is not enabled.`);
     }
-    if (this.#annotationEditorMode === mode) {
+    if (this.#annotationEditorMode === mode && !editId) {
       return; // The AnnotationEditor mode didn't change.
     }
     if (!isValidAnnotationEditorMode(mode)) {

@@ -1444,6 +1444,16 @@ class AnnotationEditor {
    * @param {PointerEvent} event
    */
   pointerdown(event) {
+    // In single-selection mode only the already-selected editor responds to
+    // pointer events. All other editors are completely inert: clicking or
+    // hovering them must have no effect. A new double-click on the underlying
+    // annotation element (handled by annotation_layer.js) is the only way to
+    // switch the selection to a different annotation.
+    if (this._uiManager._singleSelectionMode && !this.isSelected) {
+      event.stopPropagation();
+      return;
+    }
+
     const { isMac } = FeatureTest.platform;
     if (event.button !== 0 || (event.ctrlKey && isMac)) {
       // Avoid to focus this editor because of a non-left click.

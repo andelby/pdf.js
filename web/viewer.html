@@ -93,6 +93,8 @@ See https://github.com/adobe-type-tools/cmap-resources
         }
       }
     </script>
+    <!-- SwiftPDF Bridge - Init (must load before PDF.js) -->
+    <script src="pdfjs-bridge-init.js"></script>
     <script src="viewer.js" type="module"></script>
     <!--#endif-->
   </head>
@@ -1281,6 +1283,11 @@ See https://github.com/adobe-type-tools/cmap-resources
     </div>
     <!-- outerContainer -->
     <div id="printContainer"></div>
-    <script src="pdfjs_api_bridge.js"></script>
+    <!-- SwiftPDF Bridge Modules -->
+    <script src="pdfjs-bridge-api.js"></script>
+    <script src="pdfjs-bridge-events.js"></script>
+    <script src="pdfjs-bridge-smooth-zoom.js"></script>
+    <script src="pdfjs-bridge-cursor.js"></script>
+    <script src="pdfjs-bridge-scrollbar.js"></script>
   </body>
 </html>
